@@ -1,0 +1,19 @@
+{
+    "lsp": {
+        "rust-analyzer": {
+            "initialization_options": {
+                "cargo": {
+                    "features": [
+                        "rt",
+                        "stm32h743v",
+                        "defmt"
+                    ]
+                },
+                "check": {
+                    "allTargets": false,
+                    "targets": "thumbv7em-none-eabihf"
+                }
+            }
+        }
+    }
+}

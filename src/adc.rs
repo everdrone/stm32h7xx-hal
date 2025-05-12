@@ -866,16 +866,17 @@ macro_rules! adc_hal {
                     self.start_conversion_common(chan);
                 }
 
-                pub fn start_conversion_dma_circ(&mut self, chans: &[u8]) {
+                pub fn start_conversion_dma_circ(&mut self, chans: &[u8]) -> Result<(), AdcError> {
                     for chan in chans.iter() {
                         assert!(*chan <= 19);
                     }
 
                     self.rb.cfgr.modify(|_, w| unsafe { w.res().bits(self.get_resolution().into()) }); // set resolution
-                    self.rb.cfgr.modify(|_, w| w.dmngt().bits(0b11)); // circular mode enabled
+                    // self.rb.cfgr.modify(|_, w| w.dmngt().bits(0b11)); // circular mode enabled
+                    self.rb.cfgr.modify(|_, w| w.dmngt().bits(0b01)); // oneshot mode enabled
                     self.rb.cfgr.modify(|_, w| w.cont().set_bit().discen().clear_bit() ); // set continuous mode, unset discontinuous mode
                     self.rb.cfgr.modify(|_, w| w.ovrmod().overwrite()); // overwrite on overrun
-                    self.check_conversion_conditions();
+                    self.err_conversion_conditions()?;
                     self.rb.cfgr2.modify(|_, w| w.lshift().bits(self.get_lshift().value())); // set LSHIFT[3:0]
 
                     // preselect channels
@@ -893,6 +894,8 @@ macro_rules! adc_hal {
                     self.set_sequence_len(seq_len);
 
                     self.rb.cr.modify(|_, w| w.adstart().set_bit()); // start circ conversions
+
+                    Ok(())
                 }
 
                 /// Select a sequence to sample, by inputting a single channel and position.
@@ -925,7 +928,6 @@ macro_rules! adc_hal {
 
                     self.rb.sqr1.modify(|_, w| w.l().bits(len - 1));
                 }
-
 
                 /// Read sample
                 ///
@@ -976,6 +978,26 @@ macro_rules! adc_hal {
                     if cr.addis().bit_is_set() {
                         panic!("Cannot start conversion because there is a pending request to disable the ADC");
                     }
+                }
+
+                fn err_conversion_conditions(&self) -> Result<(), AdcError> {
+                    let cr = self.rb.cr.read();
+                    // Ensure that no conversions are ongoing
+                    if cr.adstart().bit_is_set() {
+                        return Err(AdcError::RegularConversionOngoing);
+                    }
+                    if cr.jadstart().bit_is_set() {
+                        return Err(AdcError::InjectedConversionOngoing);
+                    }
+                    // Ensure that the ADC is enabled
+                    if cr.aden().bit_is_clear() {
+                        return Err(AdcError::AdcDisabled);
+                    }
+                    if cr.addis().bit_is_set() {
+                        return Err(AdcError::PendingAdcDisableRequest);
+                    }
+
+                    Ok(())
                 }
 
                 /// Disable ADC
@@ -1189,6 +1211,14 @@ macro_rules! adc_hal {
             }
         )+
     }
+}
+
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum AdcError {
+    RegularConversionOngoing,
+    InjectedConversionOngoing,
+    AdcDisabled,
+    PendingAdcDisableRequest,
 }
 
 adc_hal!(
